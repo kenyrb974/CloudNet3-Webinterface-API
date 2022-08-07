@@ -1,0 +1,79 @@
+package de.dytanic.cloudnet.ext.rest.http;
+
+import de.dytanic.cloudnet.common.document.gson.JsonDocument;
+import de.dytanic.cloudnet.driver.CloudNetDriver;
+import de.dytanic.cloudnet.driver.network.http.HttpResponseCode;
+import de.dytanic.cloudnet.driver.network.http.IHttpContext;
+import de.dytanic.cloudnet.ext.rest.HttpHandler;
+import de.dytanic.cloudnet.ext.signs.SignConstants;
+import de.dytanic.cloudnet.ext.signs.configuration.SignConfiguration;
+import de.dytanic.cloudnet.ext.signs.configuration.SignConfigurationReaderAndWriter;
+import de.dytanic.cloudnet.ext.signs.node.CloudNetSignsModule;
+
+import java.io.PrintWriter;
+import java.io.StringWriter;
+
+public class V1HttpHandlerSign extends HttpHandler {
+
+    public V1HttpHandlerSign(String permission) {
+        super(permission);
+    }
+
+    @Override
+    public void handleOptions(String path, IHttpContext context) {
+        this.sendOptions(context, "GET, POST");
+    }
+
+    @Override
+    public void handleGet(String path, IHttpContext context) {
+        context
+                .response()
+                .statusCode(HttpResponseCode.HTTP_OK)
+                .header("Content-Type", "application/json")
+                .body(GSON.toJson(CloudNetSignsModule.getInstance().getSignConfiguration()))
+                .context()
+                .closeAfter(true)
+                .cancelNext()
+        ;
+    }
+
+    @Override
+    public void handlePost(String path, IHttpContext context) throws Exception {
+        try {
+            if (context.request().body().length > 0) {
+                SignConfiguration signConfiguration = GSON.fromJson(context.request().bodyAsString(), SignConfiguration.TYPE);
+
+                if (signConfiguration != null) {
+                    CloudNetSignsModule.getInstance().setSignConfiguration(signConfiguration);
+                    SignConfigurationReaderAndWriter
+                            .write(signConfiguration, CloudNetSignsModule.getInstance().getConfigurationFilePath());
+
+                    CloudNetDriver.getInstance().getMessenger().sendChannelMessage(
+                            SignConstants.SIGN_CHANNEL_NAME,
+                            SignConstants.SIGN_CHANNEL_UPDATE_SIGN_CONFIGURATION,
+                            new JsonDocument("signConfiguration", signConfiguration)
+                    );
+
+                    context
+                            .response()
+                            .statusCode(HttpResponseCode.HTTP_OK)
+                            .header("Content-Type", "application")
+                            .body(new JsonDocument("success", true).toByteArray())
+                            .context()
+                            .closeAfter(true)
+                            .cancelNext()
+                    ;
+                }
+            }
+
+        } catch (Exception ex) {
+
+            try (StringWriter writer = new StringWriter();
+                 PrintWriter printWriter = new PrintWriter(writer)) {
+                ex.printStackTrace(printWriter);
+                this.send400Response(context, writer.getBuffer().toString());
+            }
+        }
+    }
+
+}
